@@ -60,6 +60,11 @@ std::vector<Msg> parse(const std::string& path) {
             m.seq = std::strtoll(e + 1, &e, 10);
         } else if (m.type == 'H') {
             m.seq = std::strtoll(e + 1, &e, 10);
+        } else if (m.type == 'T') {              // trade: not a book change, but it carries a sequence number
+            std::strtoull(e + 1, &e, 10);
+            std::strtoll(e + 1, &e, 10);
+            std::strtoll(e + 1, &e, 10);
+            m.seq = std::strtoll(e + 1, &e, 10);
         }
         out.push_back(std::move(m));
         while (*e && *e != '\n') ++e;
@@ -129,7 +134,8 @@ int main(int argc, char** argv) {
         std::sort(msgs.begin() + i + 1, msgs.begin() + j, [](const Msg& a, const Msg& b) { return a.id < b.id; });
     }
     for (const Msg& m : msgs) {
-        if (m.type == 'S') { book = OrderBook(); text.clear(); last_seq = 0; continue; }
+        if (m.type == 'R') { last_seq = 0; continue; }   // new connection: sequence restarts
+        if (m.type == 'S') { book = OrderBook(); text.clear(); continue; }
         if (last_seq && m.seq != last_seq && m.seq != last_seq + 1) ++gaps;
         last_seq = m.seq;
         if (m.type == 'O') {
