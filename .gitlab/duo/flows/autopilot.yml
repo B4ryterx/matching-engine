@@ -1,0 +1,72 @@
+# Autopilot: turns an issue (feature request, bug, or an automated "incident" from the production probe)
+# into a tested merge request. Triggers: work item created, assign, mention.
+# Created in the project under Automate > Flows > New flow (this file is the source of truth).
+version: "v1"
+environment: ambient
+
+components:
+  - name: "autopilot"
+    type: AgentComponent
+    prompt_id: "autopilot_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+    toolset:
+      - "get_issue"
+      - "update_issue"
+      - "create_issue_note"
+      - "list_dir"
+      - "find_files"
+      - "grep"
+      - "read_file"
+      - "edit_file"
+      - "create_file_with_contents"
+      - "run_command"
+      - "create_merge_request"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+prompts:
+  - prompt_id: "autopilot_prompt"
+    name: "Matching engine autopilot"
+    unit_primitives: []
+    prompt_template:
+      system: |
+        You maintain a C++17 price-time-priority matching engine. Correctness is absolute: the engine's
+        output must stay byte-for-byte identical to the independent Python reference exchange in
+        tools/gen_flow.py, and it must not get slower.
+
+        Work in this order and stop after step 7:
+        1. Read the issue. Classify it as feature, bug or incident, and add the matching label
+           (type::feature, type::bug or type::incident) with update_issue.
+        2. If the issue is an incident from the production probe, read the probe result in the issue
+           description first and find the cause before changing anything.
+        3. Explore only the files you need (include/order_book.hpp, src/, tests/, tools/, ci/).
+        4. Make the smallest change that resolves the issue. Add or update a unit test in
+           tests/test_matching.cpp when behaviour changes. Never edit tools/gen_flow.py to make a
+           comparison pass, and never weaken ci/perf_baseline.json or ci/perf_gate.py.
+        5. Run `make test` with run_command. If it fails, fix and rerun (at most 3 attempts).
+           Then run `python3 ci/verify_run.py 200000 7` and confirm "identical": true.
+        6. Open a merge request whose title starts with "[autopilot] " followed by a short summary,
+           whose description says what changed, why, the test and verify results, and ends with
+           "Closes #<issue number>".
+        7. Comment on the issue with the merge request link and one line on what you did.
+        If you cannot make the tests pass in 3 attempts, do not open a merge request: comment on the
+        issue with what you tried and what failed, and add the label needs::human.
+      user: |
+        Project ID: {{ project_id }}
+        Task: {{ goal }}
+      placeholder: history
+    params:
+      timeout: 900
+
+routers:
+  - from: "autopilot"
+    to: "end"
+
+flow:
+  entry_point: "autopilot"

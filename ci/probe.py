@@ -4,7 +4,7 @@ Calls the live service's /verify. If the engine's output is no longer identical 
 or it has slowed beyond the baseline, opens a GitLab issue labelled `incident` with the evidence.
 That issue is what wakes the triage flow up, closing the loop without a human.
 
-Env: LIVE_URL, CI_API_V4_URL, CI_PROJECT_ID, PROBE_TOKEN (project access token, api scope)
+Env: LIVE_URL, CI_API_V4_URL, CI_PROJECT_ID, GITLAB_API_TOKEN (token with api scope)
 """
 import json, os, sys, urllib.request
 from pathlib import Path
@@ -35,7 +35,7 @@ body += f"\n\nProbe result:\n```json\n{json.dumps(res, indent=2)}\n```\nPipeline
 req = urllib.request.Request(
     f"{os.environ['CI_API_V4_URL']}/projects/{os.environ['CI_PROJECT_ID']}/issues",
     data=json.dumps({"title": "Incident: production probe failed", "description": body, "labels": "incident,automated"}).encode(),
-    headers={"Content-Type": "application/json", "PRIVATE-TOKEN": os.environ["PROBE_TOKEN"]},
+    headers={"Content-Type": "application/json", "PRIVATE-TOKEN": os.environ["GITLAB_API_TOKEN"]},
 )
 with urllib.request.urlopen(req) as r:
     print("opened issue", json.loads(r.read())["web_url"])

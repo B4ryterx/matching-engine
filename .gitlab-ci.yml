@@ -1,13 +1,26 @@
-# Post-code lifecycle for the matching engine.
-# Every change: build -> unit tests -> byte-for-byte check against an independent reference -> speed gate
-# -> security scans -> container image -> (default branch) deploy -> scheduled production probe.
-# Duo Agent Platform flows (see .gitlab/duo/) react to issues, merge requests and failed pipelines.
+# Post-code lifecycle for the matching engine ("autopilot").
+#
+#   issue ──► Duo Autopilot flow writes the change and opens an MR titled "[autopilot] …"
+#   MR    ──► build ─► unit tests ─► byte-for-byte vs independent reference ─► speed gate ─► SAST + secrets
+#             ─► gate report posted on the MR ─► auto-merge when every gate is green
+#   main  ──► container image ─► deploy ─► release (tag + changelog)
+#   schedule ─► production probe ─► opens an "incident" issue on failure ─► back to the Autopilot flow
+#
+# Duo flows live in .gitlab/duo/; the agent's build environment is .gitlab/duo/agent-config.yml.
 
-stages: [build, test, verify, secure, package, deploy, monitor]
+stages: [build, test, verify, secure, review, package, deploy, release, monitor]
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"
 
 variables:
   IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
@@ -15,14 +28,26 @@ variables:
 default:
   image: python:3.12-bookworm   # includes g++ and make
 
-.not_schedule: &not_schedule
-  - if: $CI_PIPELINE_SOURCE == "schedule"
-    when: never
-  - when: on_success
+.code_change:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - when: on_success
 
+.mr_only:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $GITLAB_API_TOKEN
+
+.main_only:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ── build / test / verify ────────────────────────────────────────────────
 build:
   stage: build
-  rules: *not_schedule
+  extends: .code_change
   script:
     - make all CXX=g++
   artifacts:
@@ -31,14 +56,14 @@ build:
 
 unit-tests:
   stage: test
-  rules: *not_schedule
+  extends: .code_change
   needs: [build]
   script:
     - build/test_matching
 
 byte-for-byte:
   stage: verify
-  rules: *not_schedule
+  extends: .code_change
   needs: [build]
   script:
     # three independent random order flows; every one must match the reference exchange exactly
@@ -50,22 +75,41 @@ byte-for-byte:
     paths: [verify.json, perf_report.json, run_*.json]
     expire_in: 4 weeks
 
+# ── secure ───────────────────────────────────────────────────────────────
 sast:
   stage: secure
-  rules: *not_schedule
+  extends: .code_change
 
 secret_detection:
   stage: secure
-  rules: *not_schedule
+  extends: .code_change
 
+# ── review: governance record + hands-off merge ──────────────────────────
+gate-report:
+  stage: review
+  extends: .mr_only
+  needs: [byte-for-byte]
+  script:
+    - python3 ci/gate_report.py
+
+auto-merge:
+  stage: review
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $GITLAB_API_TOKEN && $CI_MERGE_REQUEST_TITLE =~ /^\[autopilot\]/
+  needs: [unit-tests, byte-for-byte]
+  script:
+    # merges as soon as the whole pipeline (including security scans) has passed
+    - >
+      curl --fail -sS -X PUT -H "PRIVATE-TOKEN: $GITLAB_API_TOKEN"
+      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/merge?auto_merge=true&merge_when_pipeline_succeeds=true&should_remove_source_branch=true"
+      | python3 -c "import json,sys; d=json.load(sys.stdin); print('auto-merge set:', d.get('merge_when_pipeline_succeeds') or d.get('auto_merge_enabled'), d.get('web_url'))"
+
+# ── package / deploy / release (default branch) ──────────────────────────
 container-image:
   stage: package
+  extends: .main_only
   image: docker:27
   services: [docker:27-dind]
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule"
-      when: never
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs: [byte-for-byte, unit-tests]
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
@@ -89,6 +133,27 @@ deploy-cloud-run:
     - gcloud config set project "$GCP_PROJECT_ID"
     - bash deploy/cloud_run.sh
 
+release:
+  stage: release
+  extends: .main_only
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: [container-image]
+  script:
+    - echo "Release v1.$CI_PIPELINE_IID for $CI_COMMIT_SHORT_SHA"
+  release:
+    tag_name: v1.$CI_PIPELINE_IID
+    ref: $CI_COMMIT_SHA
+    name: "v1.$CI_PIPELINE_IID"
+    description: |
+      Automated release from pipeline $CI_PIPELINE_URL
+
+      Commit: $CI_COMMIT_TITLE
+
+      All gates passed: unit tests, byte-for-byte equality with the independent reference exchange
+      (3 × 200,000 random orders), speed gate, SAST and secret detection.
+      Container image: $IMAGE
+
+# ── monitor ──────────────────────────────────────────────────────────────
 production-probe:
   stage: monitor
   image: python:3.12-slim

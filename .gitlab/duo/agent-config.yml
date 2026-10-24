@@ -1,0 +1,4 @@
+# Build environment for Duo Agent Platform flows that run commands in this project.
+image: python:3.12-bookworm   # has g++, make and python3, so the agent can run `make test`
+setup_script:
+  - make all CXX=g++
