@@ -1,23 +1,23 @@
-"""Speed gate for CI: fail the pipeline if the engine got slower than the recorded baseline allows.
+"""Speed gate for CI, based on a same-machine A/B run (see ci/ab_bench.py).
 
-Usage: perf_gate.py <verify_result.json>
-Reads ci/perf_baseline.json: {"mean_ns": ..., "p99_ns": ..., "tolerance": 0.25}
-Writes perf_report.json (kept as a pipeline artifact) and exits 1 on a regression.
-CI machines are noisy, so the tolerance is generous and the gate checks the median of several runs upstream.
+Fails if the candidate is not byte-identical to the reference, or if it is slower than the base
+version by more than `max_slowdown` (ratio of median mean latencies on the same runner).
+Writes perf_report.json (pipeline artifact) and exits 1 on failure.
 """
 import json, sys
 from pathlib import Path
 
-base = json.loads((Path(__file__).parent / "perf_baseline.json").read_text())
+cfg = json.loads((Path(__file__).parent / "perf_baseline.json").read_text())
 res = json.loads(Path(sys.argv[1]).read_text())
-tol = base.get("tolerance", 0.25)
-
-checks = {}
-for key in ("mean_ns", "p99_ns"):
-    limit = base[key] * (1 + tol)
-    checks[key] = {"value": res[key], "baseline": base[key], "limit": round(limit, 1), "ok": res[key] is not None and res[key] <= limit}
-
-report = {"identical": res["identical"], "checks": checks, "passed": res["identical"] and all(c["ok"] for c in checks.values())}
+max_slow = cfg.get("max_slowdown", 0.15)
+ratio_ok = res["ratio"] <= 1 + max_slow
+report = {
+    "identical": res["identical"],
+    "candidate_mean_ns": res["candidate_mean_ns"], "base_mean_ns": res["base_mean_ns"],
+    "ratio": res["ratio"], "max_ratio": 1 + max_slow, "ratio_ok": ratio_ok,
+    "candidate_p99_ns": res["candidate_p99_ns"], "base_p99_ns": res["base_p99_ns"], "base_ref": res["base_ref"],
+    "passed": res["identical"] and ratio_ok,
+}
 Path("perf_report.json").write_text(json.dumps(report, indent=2))
 print(json.dumps(report, indent=2))
 sys.exit(0 if report["passed"] else 1)

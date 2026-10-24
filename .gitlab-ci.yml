@@ -66,17 +66,17 @@ byte-for-byte:
   extends: .code_change
   needs: [build]
   script:
-    # three independent random order flows; every one must match the reference exchange exactly
-    - for s in 1 2 3; do python3 ci/verify_run.py 200000 $s | tee run_$s.json; done
-    - python3 -c "import json,statistics as st; r=[json.load(open(f'run_{s}.json')) for s in (1,2,3)]; m={'identical':all(x['identical'] for x in r),'mean_ns':st.median(x['mean_ns'] for x in r),'p99_ns':st.median(x['p99_ns'] for x in r)}; json.dump(m,open('verify.json','w')); print(m)"
+    # three random order flows; candidate must match the reference exactly, and is timed
+    # against the base version built on the same runner (A/B), so runner speed cancels out
+    - python3 ci/ab_bench.py
     - python3 ci/perf_gate.py verify.json
   artifacts:
     when: always
-    paths: [verify.json, perf_report.json, run_*.json]
+    paths: [verify.json, perf_report.json]
     expire_in: 4 weeks
 
 # ── secure ───────────────────────────────────────────────────────────────
-sast:
+semgrep-sast:
   stage: secure
   extends: .code_change
 

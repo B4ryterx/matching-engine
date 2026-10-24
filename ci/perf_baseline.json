@@ -1,7 +1,7 @@
 {
-  "note": "Calibrated on GitLab shared runners, pipeline 2984092482 (24 Oct 2026): median of 3 runs = 61 ns mean, 150 ns p99. Tolerance covers runner-to-runner noise.",
-  "mean_ns": 65,
-  "p99_ns": 160,
-  "tolerance": 0.3,
+  "note": "CI gates on a same-machine A/B ratio (max_slowdown). mean_ns / prod_factor are only for the production probe: shared runners measured 61-85 ns for the same code (24 Oct 2026).",
+  "max_slowdown": 0.15,
+  "mean_ns": 85,
+  "tolerance": 0.25,
   "prod_factor": 2.0
 }

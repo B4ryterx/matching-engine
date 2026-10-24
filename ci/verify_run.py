@@ -14,16 +14,17 @@ ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "build"
 
 
-def run(n_orders=200_000, seed=1, levels=10):
+def run(n_orders=200_000, seed=1, levels=10, bin_dir=None):
+    bin_dir = Path(bin_dir) if bin_dir else BIN
     t0 = time.time()
     with tempfile.TemporaryDirectory() as d:
         subprocess.run([sys.executable, "-I", str(ROOT / "tools" / "gen_flow.py"), d, str(n_orders), str(levels), str(seed)],
                        check=True, capture_output=True)
-        subprocess.run([str(BIN / "match_flow"), f"{d}/flow.csv", f"{d}/out_message.csv", f"{d}/out_orderbook.csv", str(levels)],
+        subprocess.run([str(bin_dir / "match_flow"), f"{d}/flow.csv", f"{d}/out_message.csv", f"{d}/out_orderbook.csv", str(levels)],
                        check=True, capture_output=True)
         identical = (filecmp.cmp(f"{d}/out_message.csv", f"{d}/ref_message.csv", shallow=False)
                      and filecmp.cmp(f"{d}/out_orderbook.csv", f"{d}/ref_orderbook.csv", shallow=False))
-        rep = subprocess.run([str(BIN / "replay_lobster"), f"{d}/ref_message.csv", f"{d}/ref_orderbook.csv"],
+        rep = subprocess.run([str(bin_dir / "replay_lobster"), f"{d}/ref_message.csv", f"{d}/ref_orderbook.csv"],
                              capture_output=True, text=True)
     out = rep.stdout
     mean = re.search(r"mean (\d+) ns per message", out)
