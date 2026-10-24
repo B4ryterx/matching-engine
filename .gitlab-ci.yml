@@ -24,6 +24,8 @@ workflow:
 
 variables:
   IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  AST_ENABLE_MR_PIPELINES: "true"
+  SAST_EXCLUDED_PATHS: "data, build"
 
 default:
   image: python:3.12-bookworm   # includes g++ and make
@@ -76,13 +78,8 @@ byte-for-byte:
     expire_in: 4 weeks
 
 # ── secure ───────────────────────────────────────────────────────────────
-semgrep-sast:
-  stage: secure
-  extends: .code_change
-
-secret_detection:
-  stage: secure
-  extends: .code_change
+# The SAST (semgrep) and secret-detection jobs come from GitLab's templates; with
+# AST_ENABLE_MR_PIPELINES they also run in merge request pipelines, before anything merges.
 
 # ── review: governance record + hands-off merge ──────────────────────────
 gate-report:
