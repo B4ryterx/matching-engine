@@ -1,0 +1,7 @@
+{
+  "note": "Shared CI runners are slower and noisier than a laptop. Recalibrate mean_ns and p99_ns from the first three green pipelines (ci/perf_gate.py prints the values).",
+  "mean_ns": 120,
+  "p99_ns": 400,
+  "tolerance": 0.25,
+  "prod_factor": 2.0
+}
